@@ -1,0 +1,344 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <title>PIKMINizer 2</title>
+  </head>
+  <body>
+    <h1>PIKMINizer 2</h1>
+    <p>
+      Pitch: <span id="p_value">2.4</span>
+      <input type="range" min="5" max="80" id="pitch" size="1" onchange="onPitch()" value="24"/>
+    </p>
+    <p>Audio: <a href="http://open-jtalk.sp.nitech.ac.jp/">OpenJtalk </a>, &nbsp;
+    Reference: &nbsp;
+      <a href="http://postd.cc/are-haskell-engineers-second-rate/">
+        POSTD 翻訳】Haskellのエンジニアは二流なのか？（答えはノーである）
+      </a>
+    </p>
+    <div style="border-left: solid 4px #AAA;">
+      <p style="paddin: 1em; margin: 1em; width: 50%;">二流のJava開発者に顕著な特徴は（これはきっと.NETや、多分C++でさえも同様なのですが）、プログラミングについての考えが「Javaで何ができるのか」という所で止まってしまっているということです。</p>
+    </div>
+    <textarea rows="8" style="font-size: 12pt; border: solid 2px #AAA; width: 50%;" id="log"></textarea>
+    <script type="text/javascript">
+"use strict"
+
+window.app = {
+  _filled:      false,
+  _buf_lch_0:   null,
+  _buf_rch_0:   null,
+  _buf_lch_1:   null,
+  _buf_rch_1:   null,
+  _buf:         null,
+  _buf_size:    16384,
+  pitch:        2.4,
+  _offset_lim:  16,
+  _offset:      0,
+  _filling:     0,
+  date:         0,
+  startOffset:  0,
+  startTime:    0,
+  ctx:          new AudioContext (),
+  octx:         new OfflineAudioContext (2, 44100 * 2, 44100),
+  scrp:         null,
+  gain:         null,
+  comp:         null,
+}
+
+var PI2 = Math.PI * 2
+
+var puts = function (message) {
+  var t = document.querySelector("#log")
+  t.innerHTML += message + "\n"
+  t.scrollTop = t.scrollHeight
+
+  console.info (message)
+}
+
+var getBitReversedArray = function (N /* is 2^n */) {
+  var r = 0
+  var s = 0
+  var N2 = 2 * N
+  var offset = 0
+  var bit_reversed_array = []
+
+  do {
+    bit_reversed_array[offset] = s
+    offset += 1
+    r += 2
+    s ^= N - (N / (r&-r))
+  } while (r < N2)
+  return bit_reversed_array
+}
+
+
+var n = app._buf_size * app._offset_lim
+var bit_rev = getBitReversedArray (n)
+var table_size = n / 2
+var costable = new Float32Array (table_size)
+var sintable = new Float32Array (table_size)
+
+for (var k = 0; k < table_size; k++) {
+  costable [k] = Math.cos (PI2 * k / n)
+  sintable [k] = Math.sin (PI2 * k / n)
+}
+
+var rfft = function (input) {
+  var n = app._buf_size * app._offset_lim
+  var output = {real: new Float32Array (n), imag: new Float32Array (n)}
+
+  for (var k = 0; k < n; k += 1) {
+    var b = bit_rev [k]
+    output.real [k] = input.real [b]
+    output.imag [k] = input.imag [b]
+  }
+  for (var k = 1; k < n; k = k2) {
+    var h = 0
+    var k2 = k * 2
+    var d = n / k2
+
+    for (var j = 0; j < k; j++) {
+      var c = costable [h]
+      var s = sintable [h]
+
+      for (var i = j; i < n; i += k2) {
+        var ik = i + k
+        var d_real = s * output.imag [ik] + c * output.real [ik]
+        var d_imag = c * output.imag [ik] - s * output.real [ik]
+
+        output.real [ik] = output.real [i] - d_real
+        output.imag [ik] = output.imag [i] - d_imag
+        output.real [i] += d_real
+        output.imag [i] += d_imag
+      }
+      h += d
+    }
+  }
+  return output
+}
+
+var windowing = function (input) {
+  for (var k = 0; k < app._buf_size; k++) {
+    input.real [k] = input.real [k] * (0.54 + 0.46 * Math.cos (PI2 * (k - 8) / app._buf_size))
+  }
+  return input
+}
+
+var shifter = function (input) {
+  var size = app._buf_size * app._offset_lim
+  var output = {real: new Float32Array (size), imag: new Float32Array (size)}
+  var pitch = app.pitch
+  var offset = 0
+
+  for (var j = 0; j < app._buf_size; j++) {
+    output.real [j] = 0
+    output.imag [j] = 0
+  }
+  for (var k = 0; k < app._buf_size; k++) {
+    offset = Math.floor (k * pitch)
+    if (offset < app._buf_size) {
+      output.real [offset] += input.real [k]
+      output.imag [offset]  = input.imag [k] * pitch
+    }
+  }
+  return output
+}
+
+var irfft = function (input) {
+  var n = app._buf_size
+
+  for (var k = 0; k < n; k++) {
+    input.imag [k] *= -1
+  }
+  var output = rfft (input)
+
+  for (var k = 0; k < n; k++) {
+    output.real [k] /= n
+  }
+  return output
+}
+
+var zeroFill = function (event) {
+  if (app._offset === app._offset_lim - 1) {
+    app.proc.onaudioprocess = window.process0
+  }
+
+  var in0 = event.inputBuffer.getChannelData (0)
+  var in1 = event.inputBuffer.getChannelData (1)
+  var out0 = event.outputBuffer.getChannelData (0)
+  var out1 = event.outputBuffer.getChannelData (1)
+  var base = app._buf_size * app._offset
+
+  for (var k = 0; k < app._buf_size; k += 1) {
+    out0 [k] = 0
+    out1 [k] = 0
+    app._buf_lch_0 [base + k] = in0 [k]
+    app._buf_rch_0 [base + k] = in1 [k]
+  }
+  app._offset += 1
+
+  if (app._offset === app._offset_lim) {
+    app._offset = 0
+    app._filling = 1
+  }
+}
+
+var pitchShift = function (mode) {
+  var size = app._buf_size * app._offset_lim
+  if (mode === 1) {
+    var raw_wave0 = {real: app._buf_lch_1, imag: new Float32Array (size)}
+    var raw_wave1 = {real: app._buf_lch_1, imag: new Float32Array (size)}
+  } else {
+    var raw_wave0 = {real: app._buf_lch_0, imag: new Float32Array (size)}
+    var raw_wave1 = {real: app._buf_lch_0, imag: new Float32Array (size)}
+  }
+  var wave0 = windowing (raw_wave0)
+  var wave1 = windowing (raw_wave1)
+
+  var spectrum0 = rfft (wave0)
+  var spectrum1 = rfft (wave1)
+  var shifted0 = shifter (spectrum0)
+  var shifted1 = shifter (spectrum1)
+  var shifted_wave0 = irfft (shifted0)
+  var shifted_wave1 = irfft (shifted1)
+
+  if (mode === 1) {
+    // app._buf_lch_1 = new Float32Array (size)
+    // app._buf_rch_1 = new Float32Array (size)
+    app._buf_lch_1 = new Float32Array (shifted_wave0.real)
+    app._buf_rch_1 = new Float32Array (shifted_wave1.real)
+  } else {n
+    // app._buf_lch_0 = new Float32Array (size)
+    // app._buf_rch_0 = new Float32Array (size)
+    app._buf_lch_0 = new Float32Array (shifted_wave0.real)
+    app._buf_rch_0 = new Float32Array (shifted_wave1.real)
+  }
+}
+
+var process0 = function (event) {
+  var in0 = event.inputBuffer.getChannelData (0)
+  var in1 = event.inputBuffer.getChannelData (1)
+  var out0 = event.outputBuffer.getChannelData (0)
+  var out1 = event.outputBuffer.getChannelData (1)
+
+  if (app._offset === app._offset_lim - 1) {
+    pitchShift (1)
+    app.proc.onaudioprocess = window.process1
+  }
+  if (app._offset === app._offset_lim) {
+    app._offset = 0
+  }
+
+  var base = app._buf_size * app._offset
+  for (var k = 0; k < app._buf_size; k += 1) {
+    out0 [k] = app._buf_lch_0 [base + k]
+    out1 [k] = app._buf_rch_0 [base + k]
+    app._buf_lch_1 [base + k] = in0 [k]
+    app._buf_rch_1 [base + k] = in1 [k]
+  }
+  app._offset += 1
+}
+
+var process1 = function (event) {
+  var in0 = event.inputBuffer.getChannelData (0)
+  var in1 = event.inputBuffer.getChannelData (1)
+  var out0 = event.outputBuffer.getChannelData (0)
+  var out1 = event.outputBuffer.getChannelData (1)
+
+  if (app._offset === app._offset_lim - 1) {
+    pitchShift (0)
+    app.proc.onaudioprocess = window.process0
+  }
+  if (app._offset === app._offset_lim) {
+    app._offset = 0
+  }
+
+  var base = app._buf_size * app._offset
+  for (var k = 0; k < app._buf_size; k += 1) {
+    out0 [k] = app._buf_lch_1 [base + k]
+    out1 [k] = app._buf_rch_1 [base + k]
+    app._buf_lch_0 [base + k] = in0 [k]
+    app._buf_rch_0 [base + k] = in1 [k]
+  }
+  app._offset += 1
+}
+
+var loadAudio = function (url) {
+  return new Promise(function (resolve, reject) {
+    var req = new XMLHttpRequest ()
+
+    req.open ('GET', url)
+    req.responseType = 'arraybuffer'
+    req.onload = function () {
+      if (req.status == 200) {
+        resolve (req.response)
+      } else {
+        reject (Error(req.statusText))
+      }
+    }
+    req.onerror = function () {
+      reject (Error ("Network Error"))
+    }
+    req.send ()
+  })
+}
+
+var initiallize = function () {
+  app.o_src        = app.ctx.createBufferSource ()
+  app.o_src.buffer = app._buf
+  app.o_src.loop   = true
+
+  app.comp = app.ctx.createDynamicsCompressor ()
+  app.comp.threshold.value = -50
+  app.comp.knee.value      = 40
+  app.comp.ratio.value     = 12
+  app.comp.reduction.value = -20
+  app.comp.attack.value    = 0
+  app.comp.release.value   = 0.25
+
+  app.gain = app.ctx.createGain ()
+  app.gain.value = 1.0
+
+  app.proc = app.ctx.createScriptProcessor (app._buf_size)
+  app.proc.onaudioprocess = window.zeroFill
+
+  app.o_src.connect (app.proc)
+  app.proc.connect (app.comp)
+  app.comp.connect (app.gain)
+  app.gain.connect (app.ctx.destination)
+  puts ("done: initiallize ()")
+  app.o_src.start()
+}
+
+window.onload = function () {
+  var size = app._buf_size * app._offset_lim
+  app._buf_lch_0 = new Float32Array (size)
+  app._buf_rch_0 = new Float32Array (size)
+  app._buf_lch_1 = new Float32Array (size)
+  app._buf_rch_1 = new Float32Array (size)
+
+  loadAudio('/audio/voice.wav')
+  .then (function (res) {
+    puts ("done: loadAudio ()")
+    app.ctx.decodeAudioData (res, function (buf) {
+      puts ("done: decodeAudioData ()")
+      app._buf = buf
+      initiallize ()
+    })
+  }, function (err) {
+    puts (err)
+  })
+}
+
+var onPitch = function () {
+  var v = parseInt (document.querySelector ("#pitch").value)
+  var e = document.querySelector ("#p_value")
+
+  e.innerHTML = v / 10
+  app.pitch = v / 10
+  puts ("done: pitch = " + v / 10)
+}
+
+    </script>
+  </body>
+</html>
+
