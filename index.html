@@ -228,7 +228,7 @@ window.onload = function () {
   app._buf_lch = new Float32Array (buf_len)
   app._buf_rch = new Float32Array (buf_len)
 
-  loadAudio('/pikminizer/audio/voice.wav')
+  loadAudio('/audio/voice.wav')
   .then (function (res) {
     puts ("done: loadAudio ()")
     app.ctx.decodeAudioData (res, function (buf) {
