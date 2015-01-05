@@ -1,0 +1,107 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <title>PIKMINizer 2</title>
+  </head>
+  <body>
+    <h1>PIKMINizer 2</h1>
+    <p>
+      Pitch: <span id="p_value">2.4</span>
+      <input type="range" min="5" max="80" id="pitch" size="1" onchange="onPitch()" value="24"/>
+    </p>
+    <p>Audio: <a href="http://open-jtalk.sp.nitech.ac.jp/">OpenJtalk </a>, &nbsp;
+    Reference: &nbsp;
+      <a href="http://postd.cc/are-haskell-engineers-second-rate/">
+        POSTD 翻訳】Haskellのエンジニアは二流なのか？（答えはノーである）
+      </a>
+    </p>
+    <div style="border-left: solid 4px #AAA;">
+      <p style="paddin: 1em; margin: 1em; width: 50%;">二流のJava開発者に顕著な特徴は（これはきっと.NETや、多分C++でさえも同様なのですが）、プログラミングについての考えが「Javaで何ができるのか」という所で止まってしまっているということです。</p>
+    </div>
+    <textarea rows="8" style="font-size: 12pt; border: solid 2px #AAA; width: 50%;" id="log"></textarea>
+    <script type="text/javascript">
+"use strict"
+
+window.app = {
+  ctx:          new AudioContext (),
+  octx:         new OfflineAudioContext (2, 44100 * 2, 44100),
+  startOffset:  0,
+  startTime:    0,
+  buff:         null,
+  comp:         null,
+  gain:         null,
+  pitch:        1.25,
+  _buf:         null,
+}
+
+var puts = function (message) {
+  var t = document.querySelector("#log")
+
+  console.info (message)
+  t.innerHTML += message + "\n"
+  t.scrollTop = t.scrollHeight
+}
+
+var loadAudio = function (url) {
+  return new Promise(function (resolve, reject) {
+    var req = new XMLHttpRequest ()
+
+    req.open ('GET', url)
+    req.responseType = 'arraybuffer'
+    req.onload = function () {
+      if (req.status == 200) {
+        resolve (req.response)
+      } else {
+        reject (Error(req.statusText))
+      }
+    }
+    req.onerror = function () {
+      reject (Error ("Network Error"))
+    }
+    req.send ()
+  })
+}
+
+var initiallize = function () {
+  app.buff        = app.ctx.createBufferSource ()
+  app.buff.buffer = app._buf
+  app.buff.loop   = true
+
+  app.comp = app.ctx.createDynamicsCompressor ()
+  app.comp.threshold.value = -50
+  app.comp.knee.value      = 40
+  app.comp.ratio.value     = 12
+  app.comp.reduction.value = -20
+  app.comp.attack.value    = 0
+  app.comp.release.value   = 0.25
+
+  app.gain = app.ctx.createGain ()
+  app.gain.value = 1.0
+
+  app.buff.connect (app.comp)
+  app.comp.connect (app.gain)
+  app.gain.connect (app.ctx.destination)
+
+  puts ("done: initiallize ()")
+  app.detune.value = 1.4
+  app.buff.start()
+}
+
+window.onload = function () {
+  loadAudio('/audio/voice.wav')
+  .then (function (res) {
+    puts ("done: loadAudio ()")
+    app.ctx.decodeAudioData (res, function (buf) {
+      puts ("done: decodeAudioData ()")
+      app._buf = buf
+      initiallize ()
+    })
+  }, function (err) {
+    puts (err)
+  })
+}
+
+    </script>
+  </body>
+</html>
+
