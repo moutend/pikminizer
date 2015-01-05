@@ -30,8 +30,8 @@ window.app = {
   _buf_rch_1:   null,
   _buf:         null,
   _buf_size:    16384,
-  pitch:        2.4,
-  _offset_lim:  16,
+  pitch:        1.25,
+  _offset_lim:  8,
   _offset:      0,
   _filling:     0,
   date:         0,
@@ -204,13 +204,13 @@ var pitchShift = function (mode) {
   if (mode === 1) {
     // app._buf_lch_1 = new Float32Array (size)
     // app._buf_rch_1 = new Float32Array (size)
-    app._buf_lch_1 = new Float32Array (shifted_wave0.real)
-    app._buf_rch_1 = new Float32Array (shifted_wave1.real)
+    app._buf_lch_1 = shifted_wave0.real
+    app._buf_rch_1 = shifted_wave1.real
   } else {n
     // app._buf_lch_0 = new Float32Array (size)
     // app._buf_rch_0 = new Float32Array (size)
-    app._buf_lch_0 = new Float32Array (shifted_wave0.real)
-    app._buf_rch_0 = new Float32Array (shifted_wave1.real)
+    app._buf_lch_0 = shifted_wave0.real
+    app._buf_rch_0 = shifted_wave1.real
   }
 }
 
@@ -221,10 +221,11 @@ var process0 = function (event) {
   var out1 = event.outputBuffer.getChannelData (1)
 
   if (app._offset === app._offset_lim - 1) {
-    pitchShift (1)
+    // pitchShift (1)
     app.proc.onaudioprocess = window.process1
   }
   if (app._offset === app._offset_lim) {
+    pitchShift (0)
     app._offset = 0
   }
 
@@ -245,10 +246,11 @@ var process1 = function (event) {
   var out1 = event.outputBuffer.getChannelData (1)
 
   if (app._offset === app._offset_lim - 1) {
-    pitchShift (0)
+    // pitchShift (0)
     app.proc.onaudioprocess = window.process0
   }
   if (app._offset === app._offset_lim) {
+    pitchShift (1)
     app._offset = 0
   }
 
