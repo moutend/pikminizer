@@ -1,10 +1,10 @@
 <!DOCTYPE html>
 <html>
   <head>
-    <title>PIKMINizer</title>
+    <title>PIKMINizer 2</title>
   </head>
   <body>
-    <h1>PIKMINizer</h1>
+    <h1>PIKMINizer 3</h1>
     <p>
       Pitch: <span id="p_value">2.4</span>
       <input type="range" min="5" max="80" id="pitch" size="1" onchange="onPitch()" value="24"/>
@@ -24,13 +24,17 @@
 
 window.app = {
   _filled:      false,
-  _buf_lch:     null,
-  _buf_rch:     null,
+  _buf_lch_0:   null,
+  _buf_rch_0:   null,
+  _buf_lch_1:   null,
+  _buf_rch_1:   null,
   _buf:         null,
   _buf_size:    16384,
-  pitch:        2.4,
-  _offset_lim:  128,
+  _offset_lim:  2,
   _offset:      0,
+  _filling:     0,
+  pitch:        1.25,
+  date:         0,
   startOffset:  0,
   startTime:    0,
   ctx:          new AudioContext (),
@@ -43,9 +47,11 @@ window.app = {
 var PI2 = Math.PI * 2
 
 var puts = function (message) {
+  var t = document.querySelector("#log")
+  t.innerHTML += message + "\n"
+  t.scrollTop = t.scrollHeight
+
   console.info (message)
-  var elem = document.querySelector("#log")
-  elem.innerHTML += message + "\n"
 }
 
 var getBitReversedArray = function (N /* is 2^n */) {
@@ -64,12 +70,11 @@ var getBitReversedArray = function (N /* is 2^n */) {
   return bit_reversed_array
 }
 
-var bit_rev = getBitReversedArray (app._buf_size)
-
-var n = app._buf_size
+var n          = app._buf_size * app._offset_lim
+var bit_rev    = getBitReversedArray (n)
 var table_size = n / 2
-var costable = new Float32Array (table_size)
-var sintable = new Float32Array (table_size)
+var costable   = new Float32Array (table_size)
+var sintable   = new Float32Array (table_size)
 
 for (var k = 0; k < table_size; k++) {
   costable [k] = Math.cos (PI2 * k / n)
@@ -77,15 +82,15 @@ for (var k = 0; k < table_size; k++) {
 }
 
 var rfft = function (input) {
-  var n = app._buf_size
+  var size = app._buf_size * app._offset_lim
   var output = {real: new Float32Array (n), imag: new Float32Array (n)}
 
-  for (var k = 0; k < n; k += 1) {
+  for (var k = 0; k < size; k += 1) {
     var b = bit_rev [k]
     output.real [k] = input.real [b]
     output.imag [k] = input.imag [b]
   }
-  for (var k = 1; k < n; k = k2) {
+  for (var k = 1; k < size; k = k2) {
     var h = 0
     var k2 = k * 2
     var d = n / k2
@@ -96,13 +101,13 @@ var rfft = function (input) {
 
       for (var i = j; i < n; i += k2) {
         var ik = i + k
-        var d_real = s * output.imag [ik] + c * output.real [ik]
-        var d_imag = c * output.imag [ik] - s * output.real [ik]
+        var delta_real = s * output.imag [ik] + c * output.real [ik]
+        var delta_imag = c * output.imag [ik] - s * output.real [ik]
 
-        output.real [ik] = output.real [i] - d_real
-        output.imag [ik] = output.imag [i] - d_imag
-        output.real [i] += d_real
-        output.imag [i] += d_imag
+        output.real [ik] = output.real [i] - delta_real
+        output.imag [ik] = output.imag [i] - delta_imag
+        output.real [i] += delta_real
+        output.imag [i] += delta_imag
       }
       h += d
     }
@@ -111,24 +116,26 @@ var rfft = function (input) {
 }
 
 var windowing = function (input) {
-  for (var k = 0; k < app._buf_size; k++) {
-    input.real [k] = input.real [k] * (0.54 + 0.46 * Math.cos (PI2 * (k - 8) / app._buf_size))
+  var size = app._buf_size * app._offset_lim
+  for (var k = 0; k < size; k++) {
+    input.real [k] = input.real [k] * (0.54 + 0.46 * Math.cos (PI2 * (k - size / 2) / size))
   }
   return input
 }
 
 var shifter = function (input) {
-  var output = {real: new Float32Array (app._buf_size), imag: new Float32Array (app._buf_size)}
+  var size = app._buf_size * app._offset_lim
+  var output = {real: new Float32Array (size), imag: new Float32Array (size)}
   var pitch = app.pitch
   var offset = 0
 
-  for (var j = 0; j < app._buf_size; j++) {
-    output.real [j] = 0
-    output.imag [j] = 0
+  for (var k = 0; k < size; k++) {
+    output.real [k] = 0
+    output.imag [k] = 0
   }
-  for (var k = 0; k < app._buf_size; k++) {
+  for (var k = 0; k < size; k++) {
     offset = Math.floor (k * pitch)
-    if (offset < app._buf_size) {
+    if (offset < size) {
       output.real [offset] += input.real [k]
       output.imag [offset]  = input.imag [k] * pitch
     }
@@ -137,28 +144,52 @@ var shifter = function (input) {
 }
 
 var irfft = function (input) {
-  var n = app._buf_size
-
-  for (var k = 0; k < n; k++) {
+  var size = app._buf_size * app._offset_lim
+  for (var k = 0; k < size; k++) {
     input.imag [k] *= -1
   }
-  var output = rfft (input)
 
-  for (var k = 0; k < n; k++) {
-    output.real [k] /= n
+  var output = rfft (input)
+  for (var k = 0; k < size; k++) {
+    output.real [k] /= size
   }
   return output
 }
 
-var process = function (event) {
+var zeroFill = function (event) {
+  if (app._offset === app._offset_lim - 1) {
+    app.proc.onaudioprocess = window.process0
+  }
+
   var in0 = event.inputBuffer.getChannelData (0)
   var in1 = event.inputBuffer.getChannelData (1)
   var out0 = event.outputBuffer.getChannelData (0)
   var out1 = event.outputBuffer.getChannelData (1)
-  var _base = app._buf_size * app._offset
+  var base = app._buf_size * app._offset
 
-  var raw_wave0 = {real: new Float32Array (in0), imag: new Float32Array (app._buf_size)}
-  var raw_wave1 = {real: new Float32Array (in1), imag: new Float32Array (app._buf_size)}
+  for (var k = 0; k < app._buf_size; k += 1) {
+    out0 [k] = 0
+    out1 [k] = 0
+    app._buf_lch_0 [base + k] = in0 [k]
+    app._buf_rch_0 [base + k] = in1 [k]
+  }
+  app._offset += 1
+
+  if (app._offset === app._offset_lim) {
+    app._offset += 0
+    app._filling = 1
+  }
+}
+
+var pitchShift = function (mode) {
+  var size = app._buf_size * app._offset_lim
+  if (mode === 1) {
+    var raw_wave0 = {real: new Float32Array (app._buf_lch_1), imag: new Float32Array (size)}
+    var raw_wave1 = {real: new Float32Array (app._buf_lch_1), imag: new Float32Array (size)}
+  } else {
+    var raw_wave0 = {real: new Float32Array (app._buf_lch_0), imag: new Float32Array (size)}
+    var raw_wave1 = {real: new Float32Array (app._buf_lch_0), imag: new Float32Array (size)}
+  }
   var wave0 = windowing (raw_wave0)
   var wave1 = windowing (raw_wave1)
 
@@ -166,14 +197,70 @@ var process = function (event) {
   var spectrum1 = rfft (wave1)
   var shifted0 = shifter (spectrum0)
   var shifted1 = shifter (spectrum1)
+  var shifted_wave0 = irfft (shifted0)
+  var shifted_wave1 = irfft (shifted1)
 
-  app._buf_lch = irfft (shifted0)
-  app._buf_rch = irfft (shifted1)
-
-  for (var k = 0; k < app._buf_size; k += 1) {
-    out0 [k] = app._buf_lch.real[k]
-    out1 [k] = app._buf_rch.real[k]
+  if (mode === 1) {
+    // app._buf_lch_1 = new Float32Array (size)
+    // app._buf_rch_1 = new Float32Array (size)
+    app._buf_lch_1 = shifted_wave0.real
+    app._buf_rch_1 = shifted_wave1.real
+  } else {n
+    // app._buf_lch_0 = new Float32Array (size)
+    // app._buf_rch_0 = new Float32Array (size)
+    app._buf_lch_0 = shifted_wave0.real
+    app._buf_rch_0 = shifted_wave1.real
   }
+}
+
+var process0 = function (event) {
+  var in0 = event.inputBuffer.getChannelData (0)
+  var in1 = event.inputBuffer.getChannelData (1)
+  var out0 = event.outputBuffer.getChannelData (0)
+  var out1 = event.outputBuffer.getChannelData (1)
+
+  if (app._offset === app._offset_lim - 1) {
+    // pitchShift (1)
+    app.proc.onaudioprocess = window.process1
+  }
+  if (app._offset === app._offset_lim) {
+    pitchShift (0)
+    app._offset = 0
+  }
+
+  var base = app._buf_size * app._offset
+  for (var k = 0; k < app._buf_size; k += 1) {
+    out0 [k] = app._buf_lch_0 [base + k]
+    out1 [k] = app._buf_rch_0 [base + k]
+    app._buf_lch_1 [base + k] = in0 [k]
+    app._buf_rch_1 [base + k] = in1 [k]
+  }
+  app._offset += 1
+}
+
+var process1 = function (event) {
+  var in0 = event.inputBuffer.getChannelData (0)
+  var in1 = event.inputBuffer.getChannelData (1)
+  var out0 = event.outputBuffer.getChannelData (0)
+  var out1 = event.outputBuffer.getChannelData (1)
+
+  if (app._offset === app._offset_lim - 1) {
+    // pitchShift (0)
+    app.proc.onaudioprocess = window.process0
+  }
+  if (app._offset === app._offset_lim) {
+    pitchShift (1)
+    app._offset = 0
+  }
+
+  var base = app._buf_size * app._offset
+  for (var k = 0; k < app._buf_size; k += 1) {
+    out0 [k] = app._buf_lch_1 [base + k]
+    out1 [k] = app._buf_rch_1 [base + k]
+    app._buf_lch_0 [base + k] = in0 [k]
+    app._buf_rch_0 [base + k] = in1 [k]
+  }
+  app._offset += 1
 }
 
 var loadAudio = function (url) {
@@ -197,9 +284,9 @@ var loadAudio = function (url) {
 }
 
 var initiallize = function () {
-  app.o_src = app.ctx.createBufferSource ()
+  app.o_src        = app.ctx.createBufferSource ()
   app.o_src.buffer = app._buf
-  app.o_src.loop = true
+  app.o_src.loop   = true
 
   app.comp = app.ctx.createDynamicsCompressor ()
   app.comp.threshold.value = -50
@@ -213,7 +300,7 @@ var initiallize = function () {
   app.gain.value = 1.0
 
   app.proc = app.ctx.createScriptProcessor (app._buf_size)
-  app.proc.onaudioprocess = process
+  app.proc.onaudioprocess = window.zeroFill
 
   app.o_src.connect (app.proc)
   app.proc.connect (app.comp)
@@ -224,10 +311,14 @@ var initiallize = function () {
 }
 
 window.onload = function () {
-  var buf_len = app._buf_size * app._offset_lim
-  app._buf_lch = new Float32Array (buf_len)
-  app._buf_rch = new Float32Array (buf_len)
+  var size = app._buf_size * app._offset_lim
+  app._buf_lch_0 = new Float32Array (size)
+  app._buf_rch_0 = new Float32Array (size)
+  app._buf_lch_1 = new Float32Array (size)
+  app._buf_rch_1 = new Float32Array (size)
 
+  puts ("info: loadAudio ()")
+  // loadAudio('/audio/voice.wav')
   loadAudio('/pikminizer/audio/voice.wav')
   .then (function (res) {
     puts ("done: loadAudio ()")
