@@ -1,6 +1,7 @@
 <!DOCTYPE html>
 <html>
   <head>
+    <meta charset="utf-8">
     <title>PIKMINizer 2</title>
   </head>
   <body>
@@ -29,7 +30,7 @@ window.app = {
   _buf_lch_1:   null,
   _buf_rch_1:   null,
   _buf:         null,
-  _buf_size:    16384,
+  _buf_size:    4096,
   _offset_lim:  2,
   _offset:      0,
   _filling:     0,
@@ -231,6 +232,8 @@ var process0 = function (event) {
 
   var base = app._buf_size * app._offset
   for (var k = 0; k < app._buf_size; k += 1) {
+    // out0 [k] = 0
+    // out1 [k] = 0
     out0 [k] = app._buf_lch_0 [base + k]
     out1 [k] = app._buf_rch_0 [base + k]
     app._buf_lch_1 [base + k] = in0 [k]
@@ -320,7 +323,7 @@ window.onload = function () {
 
   puts ("info: loadAudio ()")
   // loadAudio('/audio/voice.wav')
-  loadAudio('/pikminizer/audio/voice.wav')
+  loadAudio('/audio/voice.wav')
   .then (function (res) {
     puts ("done: loadAudio ()")
     app.ctx.decodeAudioData (res, function (buf) {
@@ -345,4 +348,3 @@ var onPitch = function () {
     </script>
   </body>
 </html>
-
