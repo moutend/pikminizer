@@ -82,6 +82,7 @@ for (var k = 0; k < table_size; k++) {
 }
 
 var rfft = function (input) {
+  var n          = app._buf_size * app._offset_lim
   var size = app._buf_size * app._offset_lim
   var output = {real: new Float32Array (n), imag: new Float32Array (n)}
 
