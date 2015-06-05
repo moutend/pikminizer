@@ -323,7 +323,7 @@ window.onload = function () {
 
   puts ("info: loadAudio ()")
   // loadAudio('/pikminizer/audio/voice.wav')
-  loadAudio('/audio/voice.wav')
+  loadAudio('/pikminizer/audio/voice.wav')
   .then (function (res) {
     puts ("done: loadAudio ()")
     app.ctx.decodeAudioData (res, function (buf) {
